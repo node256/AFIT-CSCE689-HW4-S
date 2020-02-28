@@ -30,7 +30,7 @@ public:
    // Are we in the process of exiting the simulation?
    bool isExiting() { return _exiting; };
 
-   int getOffset() { return _time_offset; };
+   int getOffset();
 
 private:
    
@@ -45,7 +45,9 @@ private:
    float _time_mult;
    int _time_offset;
    int _verbosity;
- 
+
+   pthread_mutex_t _offset_mutex;
+
    time_t _start_time;
 };
 

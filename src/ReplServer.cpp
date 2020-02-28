@@ -74,7 +74,6 @@ void ReplServer::replicate(const char *ip_addr, unsigned short port) {
 void ReplServer::replicate() {
 
    // Track when we started the server
-   _start_time = time(NULL);
    _last_repl = 0;
 
    // Set up our queue's listening socket
