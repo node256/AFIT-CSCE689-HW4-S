@@ -18,6 +18,8 @@ AntennaSim::AntennaSim(DronePlotDB &dpdb, const char *source_filename, float tim
                                              _verbosity(verbosity),
                                              _start_time(0)
 {
+   pthread_mutex_init(&_offset_mutex, NULL);
+
    pthread_mutex_lock(&_offset_mutex);
 
    if (_verbosity == 3)
