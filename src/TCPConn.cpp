@@ -214,11 +214,29 @@ void TCPConn::handleConnection() {
 
          // Server: recieve challenge response, and send auth if correct
          case s_authenticating:
-             auth();
-             break;
+            auth();
+            break;
 
-         // Client: recive
-   
+         // Client: recieve auth status from server, send challenge
+         case s_challenging:
+            peerChall();
+            break;
+
+         // Server: recieve challenge from client, send response
+         case s_responding:
+            peerResp();
+            break;
+
+         // Client: send encrypted data if challenge is good
+         case s_edatatx:
+            transmitEncData();
+            break;
+
+         // Server: Receive encrypted data
+         case s_edatarx:
+            waitForEncData();
+            break;
+
          // Client: connecting user - replicate data
          case s_datatx:
             transmitData();
@@ -366,7 +384,7 @@ void TCPConn::respChal() {
       sendData(buf);
 
       // Wait for auth, need to change
-      //_status = s_waitack;
+      _status = s_waitauth;
    }
 }
 
@@ -403,14 +421,86 @@ void TCPConn::auth() {
          disconnect();
          return;
       }
-      
+      std::cout << "Authorized\n";
       // send our node ID if authorized.
       buf.assign(_svr_id.begin(), _svr_id.end());
       wrapCmd(buf, c_auth, c_endauth);
       sendData(buf);
 
       //need to change
-      _status = s_datarx;
+      _status = s_challenging;
+   }
+}
+
+/**********************************************************************************************
+ * peerChall()  - receives authenticated status and sends random challenge
+ *
+ *    Throws: socket_error for network issues, runtime_error for unrecoverable issues
+ **********************************************************************************************/
+
+void TCPConn::peerChall() {
+
+   // If data on the socket, should be our Auth string from our host server
+   if (_connfd.hasData()) {
+      std::vector<uint8_t> buf;
+
+      if (!getData(buf))
+         return;
+
+      if (!getCmdData(buf, c_auth, c_endauth)) {
+         std::stringstream msg;
+         msg << "AUT string from connecting client invalid format. Cannot authenticate.";
+         _server_log.writeLog(msg.str().c_str());
+         disconnect();
+         return;
+      }
+
+      std::string node(buf.begin(), buf.end());
+      setNodeID(node.c_str());
+
+      // Send our challlenge
+      srand(time(0));
+      _chall = std::to_string(rand());
+      std::cout << _chall << "\n";
+      buf.assign(_chall.begin(), _chall.end());
+      wrapCmd(buf, c_chall, c_endchall);
+      sendData(buf);
+
+      //need to change
+      _status = s_edatatx;
+   }
+}
+
+/**********************************************************************************************
+ * peerResp()  - receives the challenge from the client and sends encrypted response
+ *
+ *    Throws: socket_error for network issues, runtime_error for unrecoverable issues
+ **********************************************************************************************/
+
+void TCPConn::peerResp() {
+
+   // If data on the socket, should be our Auth string from our host server
+   if (_connfd.hasData()) {
+      std::vector<uint8_t> buf;
+
+      if (!getData(buf))
+         return;
+
+      if (!getCmdData(buf, c_chall, c_endchall)) {
+         std::stringstream msg;
+         msg << "Challenge string from connected server invalid format. Cannot authenticate.";
+         _server_log.writeLog(msg.str().c_str());
+         disconnect();
+         return;
+      }
+
+      // encrypt challenge and send response
+      encryptData(buf);
+      wrapCmd(buf, c_res, c_endres);
+      sendData(buf);
+
+      // Wait for data
+      _status = s_edatarx;
    }
 }
 
@@ -452,6 +542,43 @@ void TCPConn::transmitData() {
    }
 }
 
+/**********************************************************************************************
+ * transmitEncData()  - receives the SID from the server and transmits data
+ *
+ *    Throws: socket_error for network issues, runtime_error for unrecoverable issues
+ **********************************************************************************************/
+
+void TCPConn::transmitEncData() {
+
+   // If data on the socket, should be our Auth string from our host server
+   if (_connfd.hasData()) {
+      std::vector<uint8_t> buf;
+
+      if (!getData(buf))
+         return;
+
+      if (!getCmdData(buf, c_res, c_endres)) {
+         std::stringstream msg;
+         msg << "SID string from connected server invalid format. Cannot authenticate.";
+         _server_log.writeLog(msg.str().c_str());
+         disconnect();
+         return;
+      }
+
+      std::string node(buf.begin(), buf.end());
+      setNodeID(node.c_str());
+
+      // Send the replication data
+      sendData(_outputbuf);
+
+      if (_verbosity >= 3)
+         std::cout << "Successfully authenticated connection with " << getNodeID() <<
+                      " and sending replication data.\n";
+
+      // Wait for their response
+      _status = s_waitack;
+   }
+}
 
 /**********************************************************************************************
  * waitForData - receiving server, authentication complete, wait for replication datai
@@ -493,6 +620,45 @@ void TCPConn::waitForData() {
    }
 }
 
+/**********************************************************************************************
+ * waitForEncData - receiving server, authentication complete, wait for replication datai
+               Also sends a plaintext random auth string of our own
+ *
+ *    Throws: socket_error for network issues, runtime_error for unrecoverable issues
+ **********************************************************************************************/
+
+void TCPConn::waitForEncData() {
+
+   // If data on the socket, should be replication data
+   if (_connfd.hasData()) {
+      std::vector<uint8_t> buf;
+
+      if (!getData(buf))
+         return;
+
+      if (!getCmdData(buf, c_rep, c_endrep)) {
+         std::stringstream msg;
+         msg << "Replication data possibly corrupted from" << getNodeID() << "\n";
+         _server_log.writeLog(msg.str().c_str());
+         disconnect();
+         return;
+      }
+
+      // Got the data, save it
+      _inputbuf = buf;
+      _data_ready = true;
+
+      // Send the acknowledgement and disconnect
+      sendData(c_ack);
+
+      if (_verbosity >= 2)
+         std::cout << "Successfully received replication data from " << getNodeID() << "\n";
+
+
+      disconnect();
+      _status = s_hasdata;
+   }
+}
 
 /**********************************************************************************************
  * awaitAwk - waits for the awk that data was received and disconnects

@@ -16,7 +16,7 @@ public:
    ~TCPConn();
 
    // The current status of the connection
-   enum statustype { s_none, s_connecting, s_connected, s_challenged, s_authenticating, s_datatx, s_datarx, s_waitack, s_hasdata };
+   enum statustype { s_none, s_connecting, s_connected, s_challenged, s_authenticating, s_waitauth, s_challenging, s_responding, s_datatx, s_datarx, s_edatatx, s_edatarx, s_waitack, s_hasdata };
 
    statustype getStatus() { return _status; };
 
@@ -75,8 +75,12 @@ protected:
    void waitAuthReq();
    void respChal();
    void auth();
+   void peerChall();
+   void peerResp();
    void transmitData();
+   void transmitEncData();
    void waitForData();
+   void waitForEncData();
    void awaitAck();
 
    // Looks for commands in the data stream
