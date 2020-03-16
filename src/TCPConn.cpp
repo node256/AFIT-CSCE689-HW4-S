@@ -384,7 +384,7 @@ void TCPConn::respChal() {
       sendData(buf);
 
       // Wait for auth, need to change
-      _status = s_waitauth;
+      _status = s_challenging;
    }
 }
 
