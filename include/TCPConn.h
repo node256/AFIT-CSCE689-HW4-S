@@ -16,7 +16,7 @@ public:
    ~TCPConn();
 
    // The current status of the connection
-   enum statustype { s_none, s_connecting, s_connected, s_datatx, s_datarx, s_waitack, s_hasdata };
+   enum statustype { s_none, s_connecting, s_connected, s_challenged, s_authenticating, s_datatx, s_datarx, s_waitack, s_hasdata };
 
    statustype getStatus() { return _status; };
 
@@ -72,6 +72,9 @@ protected:
    // Functions to execute various stages of a connection 
    void sendSID();
    void waitForSID();
+   void waitAuthReq();
+   void respChal();
+   void auth();
    void transmitData();
    void waitForData();
    void awaitAck();
@@ -94,7 +97,7 @@ private:
 
    bool _connected = false;
 
-   std::vector<uint8_t> c_rep, c_endrep, c_auth, c_endauth, c_ack, c_sid, c_endsid;
+   std::vector<uint8_t> c_rep, c_endrep, c_auth, c_endauth, c_ack, c_sid, c_endsid, c_chall, c_endchall, c_res, c_endres;
 
    statustype _status = s_none;
 
@@ -102,6 +105,7 @@ private:
  
    std::string _node_id; // The username this connection is associated with
    std::string _svr_id;  // The server ID that hosts this connection object
+   std::string _chall; // random challenge number as string
 
    // Store incoming data to be read by the queue manager
    std::vector<uint8_t> _inputbuf;

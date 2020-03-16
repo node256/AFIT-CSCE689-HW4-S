@@ -1,4 +1,5 @@
 #include <stdexcept>
+#include <string>
 #include <strings.h>
 #include <unistd.h>
 #include <cstring>
@@ -38,6 +39,7 @@ TCPConn::TCPConn(LogMgr &server_log, CryptoPP::SecByteBlock &key, unsigned int v
 {
    // prep some tools to search for command sequences in data
    uint8_t slash = (uint8_t) '/';
+   
    c_rep.push_back((uint8_t) '<');
    c_rep.push_back((uint8_t) 'R');
    c_rep.push_back((uint8_t) 'E');
@@ -70,6 +72,24 @@ TCPConn::TCPConn(LogMgr &server_log, CryptoPP::SecByteBlock &key, unsigned int v
 
    c_endsid = c_sid;
    c_endsid.insert(c_endsid.begin()+1, 1, slash);
+
+   c_chall.push_back((uint8_t) '<');
+   c_chall.push_back((uint8_t) 'C');
+   c_chall.push_back((uint8_t) 'H');
+   c_chall.push_back((uint8_t) 'L');
+   c_chall.push_back((uint8_t) '>');
+
+   c_endchall = c_chall;
+   c_endchall.insert(c_endchall.begin()+1, 1, slash);
+
+   c_res.push_back((uint8_t) '<');
+   c_res.push_back((uint8_t) 'R');
+   c_res.push_back((uint8_t) 'E');
+   c_res.push_back((uint8_t) 'S');
+   c_res.push_back((uint8_t) '>');
+
+   c_endres = c_res;
+   c_endres.insert(c_endres.begin()+1, 1, slash);
 }
 
 
@@ -178,9 +198,26 @@ void TCPConn::handleConnection() {
             break;
 
          // Server: Wait for the SID from a newly-connected client, then send our SID
+         //case s_connected:
+            //waitForSID();
+            //break;
+         
+         // Server: Wait for the SID from a newly-connected client, then send challenge
          case s_connected:
-            waitForSID();
+            waitAuthReq();
             break;
+
+         // Client: receive and answer challenge
+         case s_challenged:
+            respChal();
+            break;
+
+         // Server: recieve challenge response, and send auth if correct
+         case s_authenticating:
+             auth();
+             break;
+
+         // Client: recive
    
          // Client: connecting user - replicate data
          case s_datatx:
@@ -224,7 +261,7 @@ void TCPConn::sendSID() {
    wrapCmd(buf, c_sid, c_endsid);
    sendData(buf);
 
-   _status = s_datatx; 
+   _status = s_challenged; 
 }
 
 /**********************************************************************************************
@@ -262,6 +299,120 @@ void TCPConn::waitForSID() {
    }
 }
 
+/**********************************************************************************************
+ * waitAutReq()  - receives the SID and sends random challenge
+ *
+ *    Throws: socket_error for network issues, runtime_error for unrecoverable issues
+ **********************************************************************************************/
+
+void TCPConn::waitAuthReq() {
+
+   // If data on the socket, should be our Auth string from our host server
+   if (_connfd.hasData()) {
+      std::vector<uint8_t> buf;
+
+      if (!getData(buf))
+         return;
+
+      if (!getCmdData(buf, c_sid, c_endsid)) {
+         std::stringstream msg;
+         msg << "SID string from connecting client invalid format. Cannot authenticate.";
+         _server_log.writeLog(msg.str().c_str());
+         disconnect();
+         return;
+      }
+
+      std::string node(buf.begin(), buf.end());
+      setNodeID(node.c_str());
+
+      // Send our challlenge
+      srand(time(0));
+      _chall = std::to_string(rand());
+      std::cout << _chall << "\n";
+      buf.assign(_chall.begin(), _chall.end());
+      wrapCmd(buf, c_chall, c_endchall);
+      sendData(buf);
+
+      _status = s_authenticating;
+   }
+}
+
+/**********************************************************************************************
+ * respChal()  - receives the challenge from the server and sends encrypted response
+ *
+ *    Throws: socket_error for network issues, runtime_error for unrecoverable issues
+ **********************************************************************************************/
+
+void TCPConn::respChal() {
+
+   // If data on the socket, should be our Auth string from our host server
+   if (_connfd.hasData()) {
+      std::vector<uint8_t> buf;
+
+      if (!getData(buf))
+         return;
+
+      if (!getCmdData(buf, c_chall, c_endchall)) {
+         std::stringstream msg;
+         msg << "Challenge string from connected server invalid format. Cannot authenticate.";
+         _server_log.writeLog(msg.str().c_str());
+         disconnect();
+         return;
+      }
+
+      // encrypt challenge and send response
+      encryptData(buf);
+      wrapCmd(buf, c_res, c_endres);
+      sendData(buf);
+
+      // Wait for auth, need to change
+      //_status = s_waitack;
+   }
+}
+
+/**********************************************************************************************
+ * auth()  - receives challenge response and checks authentication
+ *
+ *    Throws: socket_error for network issues, runtime_error for unrecoverable issues
+ **********************************************************************************************/
+
+void TCPConn::auth() {
+
+   // If data on the socket, should be our Auth string from our host server
+   if (_connfd.hasData()) {
+      std::vector<uint8_t> buf;
+
+      if (!getData(buf))
+         return;
+
+      if (!getCmdData(buf, c_res, c_endres)) {
+         std::stringstream msg;
+         msg << "Challenge response string from connecting client invalid format. Cannot authenticate.";
+         _server_log.writeLog(msg.str().c_str());
+         disconnect();
+         return;
+      }
+
+      // decrypt and compare to challenge
+      decryptData(buf);
+      std::string dchall(buf.begin(), buf.end());
+      if ( dchall != _chall){
+         std::stringstream msg;
+         msg << "Challenge response string from connecting client was incorrect.";
+         _server_log.writeLog(msg.str().c_str());
+         disconnect();
+         return;
+      }
+      
+      // send our node ID if authorized.
+      buf.assign(_svr_id.begin(), _svr_id.end());
+      wrapCmd(buf, c_auth, c_endauth);
+      sendData(buf);
+
+      //need to change
+      _status = s_datarx;
+   }
+}
 
 /**********************************************************************************************
  * transmitData()  - receives the SID from the server and transmits data
