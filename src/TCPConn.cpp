@@ -559,11 +559,23 @@ void TCPConn::transmitEncData() {
 
       if (!getCmdData(buf, c_res, c_endres)) {
          std::stringstream msg;
-         msg << "SID string from connected server invalid format. Cannot authenticate.";
+         msg << "Challenge response string from connecting server invalid format. Cannot authenticate.";
          _server_log.writeLog(msg.str().c_str());
          disconnect();
          return;
       }
+
+      // decrypt and compare to challenge
+      decryptData(buf);
+      std::string dchall(buf.begin(), buf.end());
+      if ( dchall != _chall){
+         std::stringstream msg;
+         msg << "Challenge response string from connecting client was incorrect.";
+         _server_log.writeLog(msg.str().c_str());
+         disconnect();
+         return;
+      }
+      std::cout << "Authorized\n";
 
       std::string node(buf.begin(), buf.end());
       setNodeID(node.c_str());
