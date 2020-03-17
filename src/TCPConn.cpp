@@ -351,6 +351,7 @@ void TCPConn::waitAuthReq() {
       wrapCmd(buf, c_chall, c_endchall);
       sendData(buf);
 
+      // wait for challenge response
       _status = s_authenticating;
    }
 }
@@ -368,6 +369,7 @@ void TCPConn::respChal() {
       std::vector<uint8_t> buf;
 
       if (!getData(buf))
+
          return;
 
       if (!getCmdData(buf, c_chall, c_endchall)) {
@@ -383,7 +385,7 @@ void TCPConn::respChal() {
       wrapCmd(buf, c_res, c_endres);
       sendData(buf);
 
-      // Wait for auth, need to change
+      // Wait for authenticated message
       _status = s_challenging;
    }
 }
@@ -427,8 +429,8 @@ void TCPConn::auth() {
       wrapCmd(buf, c_auth, c_endauth);
       sendData(buf);
 
-      //need to change
-      _status = s_challenging;
+      // wait for counter challenge
+      _status = s_responding;
    }
 }
 
@@ -449,7 +451,7 @@ void TCPConn::peerChall() {
 
       if (!getCmdData(buf, c_auth, c_endauth)) {
          std::stringstream msg;
-         msg << "AUT string from connecting client invalid format. Cannot authenticate.";
+         msg << "AUT string from connecting server invalid format. Cannot authenticate.";
          _server_log.writeLog(msg.str().c_str());
          disconnect();
          return;
@@ -466,7 +468,7 @@ void TCPConn::peerChall() {
       wrapCmd(buf, c_chall, c_endchall);
       sendData(buf);
 
-      //need to change
+      // prepare to transmit
       _status = s_edatatx;
    }
 }
@@ -488,7 +490,7 @@ void TCPConn::peerResp() {
 
       if (!getCmdData(buf, c_chall, c_endchall)) {
          std::stringstream msg;
-         msg << "Challenge string from connected server invalid format. Cannot authenticate.";
+         msg << "Challenge string from connected client invalid format. Cannot authenticate.";
          _server_log.writeLog(msg.str().c_str());
          disconnect();
          return;
@@ -581,7 +583,7 @@ void TCPConn::transmitEncData() {
       setNodeID(node.c_str());
 
       // Send the replication data
-      sendData(_outputbuf);
+      sendEncryptedData(_outputbuf);
 
       if (_verbosity >= 3)
          std::cout << "Successfully authenticated connection with " << getNodeID() <<
@@ -645,7 +647,7 @@ void TCPConn::waitForEncData() {
    if (_connfd.hasData()) {
       std::vector<uint8_t> buf;
 
-      if (!getData(buf))
+      if (!getEncryptedData(buf))
          return;
 
       if (!getCmdData(buf, c_rep, c_endrep)) {
